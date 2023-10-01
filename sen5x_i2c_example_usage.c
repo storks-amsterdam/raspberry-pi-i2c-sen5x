@@ -34,6 +34,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <stdlib.h>
+#include <time.h>
+#include <string.h>
+#include <curl/curl.h>
+#include "/opt/homebrew/opt/json-c/include/json-c/json.h" 
+
 #include <math.h>   // NAN
 #include <stdio.h>  // printf
 
@@ -46,6 +52,67 @@
  * DEFINE IT ACCORDING TO YOUR PLATFORM:
  * #define printf(...)
  */
+
+
+void send_data (int sensorID, time_t measurement_timestamp,
+                float mass_concentration_pm1p0, float mass_concentration_pm2p5, 
+                float mass_concentration_pm4p0, float mass_concentration_pm10p0, 
+                float ambient_humidity, float ambient_temperature, 
+                float voc_index, float nox_index)
+{
+    // Create a JSON object
+    struct json_object *message_obj = json_object_new_array();
+    json_object_array_add(message_obj, json_object_new_int(sensorID));
+    json_object_array_add(message_obj, json_object_new_int64((int64_t)measurement_timestamp));
+    json_object_array_add(message_obj, json_object_new_double(mass_concentration_pm1p0));
+    json_object_array_add(message_obj, json_object_new_double(mass_concentration_pm2p5));
+    json_object_array_add(message_obj, json_object_new_double(mass_concentration_pm4p0));
+    json_object_array_add(message_obj, json_object_new_double(mass_concentration_pm10p0));
+    json_object_array_add(message_obj, json_object_new_double(ambient_humidity));
+    json_object_array_add(message_obj, json_object_new_double(ambient_temperature));
+    json_object_array_add(message_obj, json_object_new_double(voc_index));
+    json_object_array_add(message_obj, json_object_new_double(nox_index));
+
+    // Convert the JSON object to a JSON string
+    const char *json_str = json_object_to_json_string(message_obj);
+
+    // Initialize libcurl
+    CURL *curl;
+    CURLcode res;
+    curl = curl_easy_init();
+    if (!curl)
+    {
+        fprintf(stderr, "Error initializing libcurl\n");
+        return;
+    }
+
+    // Define the URL
+    const char *myurl = "https://europe-west1-storks-app-dev.cloudfunctions.net/storks-app-dev-insert-to-pg";
+
+    // Set the libcurl options
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json; charset=utf-8");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_URL, myurl);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
+
+    // Send the HTTP POST request
+    res = curl_easy_perform(curl);
+    if (res != CURLE_OK)
+    {
+        fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+    } 
+    else
+    {
+        printf("Telemetry sent\n");
+    }
+
+    // Cleanup libcurl and JSON object
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+    json_object_put(message_obj);
+}
+
 
 int main(void) {
     int16_t error = 0;
@@ -127,9 +194,12 @@ int main(void) {
         printf("Error executing sen5x_start_measurement(): %i\n", error);
     }
 
-    for (int i = 0; i < 600; i++) {
+    for (int i = 0; i < 60; i++) {
         // Read Measurement
-        sensirion_i2c_hal_sleep_usec(1000000);
+        sensirion_i2c_hal_sleep_usec(1000000); // 1s
+
+        int sensorID = 1;
+        time_t measurement_timestamp = time(NULL);
 
         float mass_concentration_pm1p0;
         float mass_concentration_pm2p5;
@@ -147,34 +217,46 @@ int main(void) {
         if (error) {
             printf("Error executing sen5x_read_measured_values(): %i\n", error);
         } else {
-            printf("Mass concentration pm1p0: %.1f µg/m³\n",
-                   mass_concentration_pm1p0);
-            printf("Mass concentration pm2p5: %.1f µg/m³\n",
-                   mass_concentration_pm2p5);
-            printf("Mass concentration pm4p0: %.1f µg/m³\n",
-                   mass_concentration_pm4p0);
-            printf("Mass concentration pm10p0: %.1f µg/m³\n",
-                   mass_concentration_pm10p0);
-            if (isnan(ambient_humidity)) {
-                printf("Ambient humidity: n/a\n");
-            } else {
-                printf("Ambient humidity: %.1f %%RH\n", ambient_humidity);
-            }
-            if (isnan(ambient_temperature)) {
-                printf("Ambient temperature: n/a\n");
-            } else {
-                printf("Ambient temperature: %.1f °C\n", ambient_temperature);
-            }
-            if (isnan(voc_index)) {
-                printf("Voc index: n/a\n");
-            } else {
-                printf("Voc index: %.1f\n", voc_index);
-            }
-            if (isnan(nox_index)) {
-                printf("Nox index: n/a\n");
-            } else {
-                printf("Nox index: %.1f\n", nox_index);
-            }
+
+            printf("Successfully collected sample.\n");
+            send_data(sensorID, 
+                      measurement_timestamp, 
+                      mass_concentration_pm1p0,
+                      mass_concentration_pm2p5, 
+                      mass_concentration_pm4p0, 
+                      mass_concentration_pm10p0, 
+                      ambient_humidity, 
+                      ambient_temperature, 
+                      voc_index, 
+                      nox_index);
+            // printf("Mass concentration pm1p0: %.1f µg/m³\n",
+            //        mass_concentration_pm1p0);
+            // printf("Mass concentration pm2p5: %.1f µg/m³\n",
+            //        mass_concentration_pm2p5);
+            // printf("Mass concentration pm4p0: %.1f µg/m³\n",
+            //        mass_concentration_pm4p0);
+            // printf("Mass concentration pm10p0: %.1f µg/m³\n",
+            //        mass_concentration_pm10p0);
+            // if (isnan(ambient_humidity)) {
+            //     printf("Ambient humidity: n/a\n");
+            // } else {
+            //     printf("Ambient humidity: %.1f %%RH\n", ambient_humidity);
+            // }
+            // if (isnan(ambient_temperature)) {
+            //     printf("Ambient temperature: n/a\n");
+            // } else {
+            //     printf("Ambient temperature: %.1f °C\n", ambient_temperature);
+            // }
+            // if (isnan(voc_index)) {
+            //     printf("Voc index: n/a\n");
+            // } else {
+            //     printf("Voc index: %.1f\n", voc_index);
+            // }
+            // if (isnan(nox_index)) {
+            //     printf("Nox index: n/a\n");
+            // } else {
+            //     printf("Nox index: %.1f\n", nox_index);
+            // }
         }
     }
 
